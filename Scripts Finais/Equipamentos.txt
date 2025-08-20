@@ -1,0 +1,99 @@
+import requests
+import pandas as pd
+from tqdm import tqdm
+import os
+
+API_URL_EQUIP = "https://carchost.fieldcontrol.com.br/orders/{}/equipments"
+API_KEY = "ODU1OWZkODItYjU3MC00NjllLTlmYjEtYTA3ZGJjNzBmN2E2OjU3MDE2"
+EXCEL_OS = "ordens_de_servico.xlsx"
+EXCEL_EQUIP = "tabela_equipamentos.xlsx"
+headers = {
+    "Content-Type": "application/json;charset=UTF-8",
+    "X-Api-Key": API_KEY,
+}
+
+def busca_equipamentos(order_id):
+    url = API_URL_EQUIP.format(order_id)
+    resp = requests.get(url, headers=headers)
+    if resp.status_code == 200:
+        dados = resp.json()
+        items = dados.get("items")
+        if isinstance(items, list) and items:
+            return items
+    return []
+
+def normaliza(str_ou_valor):
+    return str(str_ou_valor).strip()
+
+def main():
+    print("==== INÍCIO DO SCRIPT TABELA DE EQUIPAMENTOS (COM MEMÓRIA DE SEM EQUIPAMENTO) ====")
+
+    df_os = pd.read_excel(EXCEL_OS, dtype=str)
+    df_os = df_os[["id", "Numero OS", "Atualizado em"]]
+    for col in df_os.columns:
+        df_os[col] = df_os[col].apply(normaliza)
+
+    if os.path.isfile(EXCEL_EQUIP):
+        df_equip_exist = pd.read_excel(EXCEL_EQUIP, dtype=str)
+        if "id_OS" not in df_equip_exist.columns:
+            df_equip_exist["id_OS"] = ""
+        if "Sem_Equipamento" not in df_equip_exist.columns:
+            df_equip_exist["Sem_Equipamento"] = ""
+        df_equip_exist["id_OS"] = df_equip_exist["id_OS"].apply(normaliza)
+    else:
+        df_equip_exist = pd.DataFrame(columns=["id_OS", "Numero OS", "Atualizado em", "id_equipamento", "Sem_Equipamento"])
+
+    print("\n--- SUPER DEBUG: análise dos IDs nas duas tabelas ---")
+    print("OS - primeiros 5 IDs únicos:", df_os["id"].drop_duplicates().head(5).tolist())
+    if not df_equip_exist.empty:
+        print("Equipamentos - primeiros 5 IDs únicos:", df_equip_exist["id_OS"].drop_duplicates().head(5).tolist())
+    print(f"OS: {df_os['id'].nunique()} IDs únicos | Equipamentos: {df_equip_exist['id_OS'].nunique()} IDs únicos")
+    diff_os = set(df_os['id']) - set(df_equip_exist['id_OS'])
+    print(f"Exemplo de IDs na OS que NÃO estão na tabela de equipamentos (até 5): {list(diff_os)[:5]}")
+    if df_equip_exist.shape[0]>0:
+        diff_equip = set(df_equip_exist['id_OS']) - set(df_os['id'])
+        print(f"Exemplo de IDs em equipamentos que NÃO estão na OS (até 5): {list(diff_equip)[:5]}")
+
+    # Só pega OS que ainda não foram processadas (nem com equipamento nem sem!)
+    processados_antes = set(df_equip_exist["id_OS"].dropna())
+    os_para_buscar = df_os[~df_os["id"].isin(processados_antes)]
+    print(f"\n[DEBUG] {len(os_para_buscar)} OS precisam ser buscadas (ainda não processadas de nenhuma forma).\n")
+
+    novas_linhas = []
+    for _, row in tqdm(os_para_buscar.iterrows(), total=len(os_para_buscar), desc="Buscando equipamentos vinculados"):
+        equipamentos = busca_equipamentos(row["id"])
+        if equipamentos:
+            for eqp in equipamentos:
+                linha = {
+                    "id_OS": row["id"],
+                    "Numero OS": row["Numero OS"],
+                    "Atualizado em": row["Atualizado em"],
+                    "Sem_Equipamento": ""
+                }
+                for k, v in eqp.items():
+                    if k == "id":
+                        linha["id_equipamento"] = v
+                    else:
+                        linha[k] = v
+                novas_linhas.append(linha)
+        else:
+            # Marca explicitamente como "sem equipamento"
+            linha = {
+                "id_OS": row["id"],
+                "Numero OS": row["Numero OS"],
+                "Atualizado em": row["Atualizado em"],
+                "id_equipamento": "",
+                "Sem_Equipamento": "SIM"
+            }
+            novas_linhas.append(linha)
+
+    if novas_linhas:
+        df_result = pd.concat([df_equip_exist, pd.DataFrame(novas_linhas)], ignore_index=True)
+        df_result = df_result.drop_duplicates(subset=["id_OS", "id_equipamento", "Sem_Equipamento"], keep="last")
+        df_result.to_excel(EXCEL_EQUIP, index=False)
+        print(f"\nProcesso completo! Salvo: {EXCEL_EQUIP} ({len(df_result)} linhas)")
+    else:
+        print("\nNenhuma OS nova para processar.")
+
+if __name__ == "__main__":
+    main()

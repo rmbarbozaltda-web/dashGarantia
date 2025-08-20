@@ -1,0 +1,138 @@
+Preciso que me ajude a criar um dashboard no python com streamlit
+
+Segue o passo a passo do projeto.
+
+Sou responsável pela gestão de pós vendas de uma empresa especializada em cozinhas industriais chamada Topema. Nossa empresa fabrica todo tipo de equipamento de cozinhas industriais como por exemplo, refrigeradores, freezers, pistas frias, vitrines refrigeradas, expositores, câmara fria, fogão industrial, chapas, fritadeiras, fornos combinados, todo tipo de mobiliário em inox, etc. Atualmente, utilizo a plataforma de gestão de ordens de serviço field control que é responsável pela gestão dos meus chamados.
+
+Na pasta do meu computador, já possuo todas as bases necessárias para o desenvolvimento de dashboards interativos, vou listar todos os arquivos que tenho e quais são suas informações:
+
+ordens_de_servico.xlsx:
+Este arquivo deverá ser o cérebro do indicador, através dele, ligamos todas as demais tabelas através de sua coluna id. Esta tabela, possui as ordens de serviços abertas para atendimento aos equipamentos que fabricamos. 
+
+Estrutura da tabela:
+
+id: Chave que deve ser utilizada para ligar as demais tabelas a ordem de serviço especifica
+Numero OS: Número da Ordem de serviço criada no sistema
+Criado em (UTC): Data de Criação em UTC
+Atualizado em (UTC): Ultima Atualização da Ordem de Serviço UTC
+archived: Coluna booleana true or false que referente ao arquivamento da ordem de serviço
+Descrição: Descrição da solicitação do cliente
+link: link do relatório de atendimento
+Etiquetas: Tipo de Equipamento (uma OS pode ter mais de 1 etiqueta atrelada)
+Tipo de Serviço: Tipo de Serviço
+Cliente: Nome do Cliente
+E-mail Cliente: E-mail do Cliente
+Contato Cliente: Contato do Cliente
+Cliente - CEP: CEP do cliente
+Cliente - Rua: Rua do Cliente
+Cliente - Número: Número do endereço do cliente
+Cliente - Bairro: Bairro do cliente
+Cliente - Complemento: complemento do endereço do cliente
+Cliente - Município: Cidade do cliente
+Cliente - Estado: Estado do cliente
+Atualizado em (Brasília): Ultima Atualização da Ordem de Serviço em horário de Brasília
+
+
+atividades.xlsx:
+Nesta tabela, são armazenadas as atividades programadas para cada ordem de serviço da tabela anterior, nela, temos informações de data de agendamento do atendimento ao cliente, quem é o colaborador responsável pela atividade, qual o status da atividade, data de conclusão da atividade, descrição de conclusão da atividade dentre outras. Cada Ordem de serviço pode conter várias atividades programadas. 
+
+Estrutura da tabela:
+
+id: Id da atividade
+duration: duração prevista da atividade
+position: irrelevante
+status: status da atividade (em ingles)
+startedAt: Data de inicio da atividade
+completedAt: Data de conclusão da atividade
+statusDescription: Descrição de Conclusão da atividade
+ratingLink: Link para avaliação da atividade pelo cliente
+description: Descrição da atividade
+viewedAt: data de visualização da atividade
+receivedAt: data de recebimento da atividade
+archived: status de arquivamento da atividade
+createdAt: data de criação da atividade
+updatedAt: data de atualização da atividade
+employee: id do colaborador
+order: id da ordem de serviço em que esta atividade está atrelada (coluna importante que vincula a atividade a ordem de serviço)
+scheduling: data em que agendamos a atividade com o cliente
+coords: Coordenadas da localização da atividade (cliente)
+startCoords: Coordenadas do inicio da atividade
+completeCoords: Coodenadas do fim da atividade
+metadata: ignorar
+status_pt: status da atividade em português
+colaborador_nome: Nome do colaborador
+
+
+tabela_equipamentos.xlsx:
+Tabela onde são armazenados os equipamentos que estão atrelados em cada Ordem de serviço. Cada OS pode conter 1 ou mais equipamentos atrelados. 
+
+
+Estrutura da tabela:
+
+id_OS: id da ordem de serviço em que esta atividade está atrelada (coluna importante que vincula o equipamento a ordem de serviço)
+Numero OS: Número da Ordem de serviço
+Atualizado em (UTC): Ultima atualização em UTC
+Atualizado em (Brasília): Ultima atualização no horário de Brasília
+info: Coluna que informa quando não existe equipamento vinculado a OS
+id: Id do equipamento
+name: Código e Nome do equipamento
+number: Serial Number do equipamento
+notes: Observações do equipamento
+qrCode: QR Code atrelado ao equipamento
+archived: Coluna boobleana que diz se o equipamento foi arquivado ou não
+avatarUrl: link da imagem do equipamento
+location: Ida da localização do equipamento
+createdAt: Data de criação do equipamento
+locationSector: Desconsiderar
+locationEnvironment: Desconsiderar
+customer: Id do cliente
+type: Id do tipo do equipamento
+customFields: Desconsiderar
+
+tabela_respostas.xlsx:
+Esta tabela contem as perguntas e respostas dos formulários de atendimento das atividades. Sempre que o técnico realiza uma atividade ele precisa preencher um formulário de conclusão onde ele aponta a falha, a causa e ação tomada para resolução (ou não) das atividades. Cada ordem de serviço pode ter 1 ou mais formulários preenchidos.
+
+Estrutura da tabela:
+
+id: Id do formulário
+name: Nome do formulário
+order.id: Id da ordem de serviço do formulário preenchido (coluna que liga o formulário a ordem de serviço)
+archived: Coluna boobleana que diz se o formulário foi arquivado ou não
+type: tipo de resposta do formulário
+title: Pergunta do formulário
+answer: Resposta do formulário
+score: pontuação do formulário (quando houver)
+position: posição da pergunta
+createdAt: data de criação do formulário
+
+
+DePara Etiquetas.xlsx:
+Tabela que faz um De/Para nas etiquetas da tabela ordens_de_servico.xlsx. Sua função é normalizar e igualar a categorização dos equipamentos. Necessário utiliza-la para trazer a categoria correta na tabela de ordens de serviço.
+
+Estrutura da tabela:
+DE: Coluna que localiza na tabela de serviços as etiquetas (tipos de equipamentos) sinalizadas no sistema.
+PARA: Coluna que converte a etiqueta da forma que ela vem no sistema na categorização correta e única.
+
+DePara Estados.xlsx:
+Tabela deverá ser utilizada para fazer um DE/PARA na coluna "Cliente - Estado" da tabela ordens_de_servico.xlsx. Sua função é normalizar e igualar a os estados. 
+
+DE: Origem vinda da tabela de ordem de serviço.
+PARA: Valor que deverá substituir o valor antigo da coluna "Cliente - Estado"
+
+
+
+Resumo do projeto: Preciso, através das tabelas acima, trazer informações sobre as tratativas de chamados abertos referente aos equipamentos fabricados que estão dentro do período de garantia. Gostaria de dashboards e indicadores que nos ajudem a entender nosso cenário atual, quantos chamados em aberto, quantos chamados fechados, qual nossa demanda em aberto, qual o tempo médio de atendimento, qual a recorrência de problemas, qual o acumulado de abertura, fechamento e backlog (dia/semana/mês/ano), qual o a média de chamados abertos (dia/semana/mês/ano), também gostaria de analises de atendimento por técnicos (colaboradores), por estado, por categoria, e qualquer outra análise que achar pertinente.
+
+Todos os arquivos citados acima estarão na mesma pasta do script.
+
+Observações: 
+
+- Considerar a data de conclusão da ordem de serviço a data da ultima atividade atrelada a ela concluída.
+- Considerar o status da ordem de serviço o status da ultima atividade atrelada a ela criada (verificar data de criação da atividade)
+- Uma OS só deve ser considerada concluída quanto todas as atividades atreladas a ela estiverem concluídas ou cancelados ou reportadas.
+- Filtrar apenas as ordens de serviço cujo valor da coluna "Tipo de Serviço" for "Garantia"
+
+
+
+
+

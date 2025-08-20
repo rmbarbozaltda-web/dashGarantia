@@ -1,0 +1,127 @@
+import requests
+import pandas as pd
+from tqdm import tqdm
+
+# === Configuração ===
+API_URL_ORDERS = "https://carchost.fieldcontrol.com.br/orders"
+API_URL_SERVICE = "https://carchost.fieldcontrol.com.br/services/"
+API_URL_CUSTOMER = "https://carchost.fieldcontrol.com.br/customers/"
+API_KEY = "ODU1OWZkODItYjU3MC00NjllLTlmYjEtYTA3ZGJjNzBmN2E2OjU3MDE2"
+LIMIT = 100
+EXCEL_CAMINHO = "ordens_de_servico.xlsx"
+headers = {
+    "Content-Type": "application/json;charset=UTF-8",
+    "X-Api-Key": API_KEY,
+}
+
+def ajusta_para_brasilia(valor):
+    campo = pd.to_datetime(valor, errors="coerce", utc=True)
+    if campo.isnull().all():
+        return campo
+    campo = campo - pd.Timedelta(hours=3)
+    return campo.dt.tz_localize(None)
+
+def get_all_orders():
+    all_orders = []
+    offset = 0
+    while True:
+        params = {"limit": LIMIT, "offset": offset}
+        resp = requests.get(API_URL_ORDERS, headers=headers, params=params)
+        if resp.status_code != 200:
+            print(f"Erro na API de ordens (status {resp.status_code})")
+            break
+        page = resp.json().get("items", [])
+        if not page:
+            break
+        all_orders.extend(page)
+        offset += LIMIT
+        if len(page) < LIMIT:
+            break
+    return all_orders
+
+def get_service_name(service_id, cache):
+    if not service_id: return None
+    if service_id in cache: return cache[service_id]
+    resp = requests.get(API_URL_SERVICE + str(service_id), headers=headers)
+    if resp.status_code == 200:
+        nome = resp.json().get("name")
+        cache[service_id] = nome
+        return nome
+    cache[service_id] = None
+    return None
+
+def get_customer_info(customer_id, cache):
+    if not customer_id: return {}
+    if customer_id in cache: return cache[customer_id]
+    resp = requests.get(API_URL_CUSTOMER + str(customer_id), headers=headers)
+    if resp.status_code == 200:
+        data = resp.json()
+        contato = data.get("contact", {})
+        address = data.get("address", {})
+        infos = {
+            "Cliente": data.get("name"),
+            "E-mail Cliente": contato.get("email"),
+            "Contato Cliente": contato.get("phone"),
+            "Cliente - CEP": address.get("zipCode"),
+            "Cliente - Rua": address.get("street"),
+            "Cliente - Número": address.get("number"),
+            "Cliente - Bairro": address.get("neighborhood"),
+            "Cliente - Complemento": address.get("complement"),
+            "Cliente - Município": address.get("city"),
+            "Cliente - Estado": address.get("state"),
+        }
+        cache[customer_id] = infos
+        return infos
+    cache[customer_id] = {}
+    return {}
+
+def main():
+    print("==== BUSCANDO TODAS AS ORDENS ====")
+    service_cache = {}
+    customer_cache = {}
+    all_orders = get_all_orders()
+    if not all_orders:
+        print("Nenhuma OS retornada da API.")
+        return
+    linhas = []
+    for os_info in tqdm(all_orders, desc="Coletando informações detalhadas"):
+        linha = {
+            "id": os_info.get("id"),
+            "Numero OS": os_info.get("identifier"),
+            "Criado em": os_info.get("createdAt"),
+            "Atualizado em": os_info.get("updatedAt"),
+            "archived": os_info.get("archived"),
+            "Descrição": os_info.get("description"),
+            # Adicionando a coluna "link"
+            "link": os_info.get("link")
+        }
+        service_id = os_info.get("service", {}).get("id") if os_info.get("service") else None
+        linha["Tipo de Serviço"] = get_service_name(service_id, service_cache)
+        customer_id = os_info.get("customer", {}).get("id") if os_info.get("customer") else None
+        cliente_info = get_customer_info(customer_id, customer_cache)
+        linha.update(cliente_info)
+        linhas.append(linha)
+    df = pd.DataFrame(linhas)
+    # Garante a existência da coluna em caso de resposta vazia
+    if "link" not in df.columns:
+        df["link"] = ""
+    if not df.empty:
+        for col in ["Criado em", "Atualizado em"]:
+            if col in df.columns:
+                df[col] = ajusta_para_brasilia(df[col]).dt.floor('s')
+        # Preencher "Atualizado em" vazio/NaT com "Criado em"
+        if "Atualizado em" in df.columns and "Criado em" in df.columns:
+            mask = df["Atualizado em"].isna()
+            df.loc[mask, "Atualizado em"] = df.loc[mask, "Criado em"]
+        # Remove arquivadas
+        antes = len(df)
+        df = df[df["archived"] == False]
+        print(f" > {antes-len(df)} OS arquivadas removidas.")
+        df.sort_values("Criado em", ascending=False, inplace=True)
+        df.to_excel(EXCEL_CAMINHO, index=False)
+        print(f"Salvo: {EXCEL_CAMINHO} ({len(df)} linhas)")
+    else:
+        print("ZERO linhas montadas.")
+
+if __name__ == "__main__":
+    main()

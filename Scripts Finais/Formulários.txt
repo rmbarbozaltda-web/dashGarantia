@@ -1,0 +1,178 @@
+import requests
+import pandas as pd
+from tqdm import tqdm
+import os
+
+API_KEY = "ODU1OWZkODItYjU3MC00NjllLTlmYjEtYTA3ZGJjNzBmN2E2OjU3MDE2"
+EXCEL_OS = "ordens_de_servico.xlsx"
+EXCEL_FORM = "tabela_formularios.xlsx"
+EXCEL_RESP = "tabela_respostas_formularios.xlsx"
+HEADERS = {
+    "Content-Type": "application/json;charset=UTF-8",
+    "X-Api-Key": API_KEY,
+}
+
+def normaliza(x):
+    return str(x).strip().lower()
+
+def formatar_resposta_json(resposta_formulario):
+    return {
+        "formulario_nome": resposta_formulario.get("name", ""),
+        "formulario_id": resposta_formulario.get("form", {}).get("id", ""),
+        "formulario_criado_em": resposta_formulario.get("createdAt", ""),
+        "ordem_id": resposta_formulario.get("order", {}).get("id", ""),
+        "respostas": [
+            {
+                "pergunta": q.get("title", ""),
+                "resposta": (
+                    ", ".join(q["answer"]) if isinstance(q.get("answer"), list) else (q.get("answer") or "")
+                )
+            }
+            for q in resposta_formulario.get("questions", [])
+        ]
+    }
+
+def busca_formularios(os_id):
+    url = f"https://carchost.fieldcontrol.com.br/orders/{os_id}/forms"
+    resp = requests.get(url, headers=HEADERS)
+    if resp.status_code == 200:
+        dados = resp.json()
+        items = dados.get("items")
+        if isinstance(items, list) and items:
+            return items
+    return []
+
+def busca_respostas_formulario(id_form):
+    url = f"https://carchost.fieldcontrol.com.br/forms-answers/{id_form}"
+    resp = requests.get(url, headers=HEADERS)
+    if resp.status_code == 200:
+        dados = resp.json()
+        return dados
+    return {}
+
+def main():
+    print("==== INÍCIO DO SCRIPT FORMULÁRIOS + RESPOSTAS (INCREMENTAL) ====")
+
+    # --- PARTE 1: BUSCA FORMULÁRIOS VINCULADOS À OS ---
+    df_os = pd.read_excel(EXCEL_OS, dtype=str)
+    df_os = df_os[["id", "Numero OS", "Atualizado em"]]
+    for col in df_os.columns:
+        df_os[col] = df_os[col].apply(lambda x: str(x).strip())
+    if os.path.isfile(EXCEL_FORM):
+        df_form_exist = pd.read_excel(EXCEL_FORM, dtype=str)
+        if "id_OS" not in df_form_exist.columns:
+            df_form_exist["id_OS"] = ""
+        if "Sem_Formulario" not in df_form_exist.columns:
+            df_form_exist["Sem_Formulario"] = ""
+        df_form_exist["id_OS"] = df_form_exist["id_OS"].apply(lambda x: str(x).strip())
+    else:
+        df_form_exist = pd.DataFrame(columns=["id_OS", "Numero OS", "Atualizado em", "id_formulario", "Sem_Formulario"])
+    processados_antes = set(df_form_exist["id_OS"].dropna())
+    os_para_buscar = df_os[~df_os["id"].isin(processados_antes)]
+    print(f"\n[DEBUG FORM] {len(os_para_buscar)} OS precisam ser analisadas para formulários.\n")
+    
+    novas_linhas_form = []
+    for _, row in tqdm(os_para_buscar.iterrows(), total=len(os_para_buscar), desc="Buscando formulários vinculados"):
+        formularios = busca_formularios(row["id"])
+        if formularios:
+            for form in formularios:
+                linha = {
+                    "id_OS": row["id"],
+                    "Numero OS": row["Numero OS"],
+                    "Atualizado em": row["Atualizado em"],
+                    "Sem_Formulario": ""
+                }
+                for k, v in form.items():
+                    if k == "id":
+                        linha["id_formulario"] = v
+                    else:
+                        linha[k] = v
+                novas_linhas_form.append(linha)
+        else:
+            linha = {
+                "id_OS": row["id"],
+                "Numero OS": row["Numero OS"],
+                "Atualizado em": row["Atualizado em"],
+                "id_formulario": "",
+                "Sem_Formulario": "SIM"
+            }
+            novas_linhas_form.append(linha)
+    if novas_linhas_form:
+        df_form_tudo = pd.concat([df_form_exist, pd.DataFrame(novas_linhas_form)], ignore_index=True)
+        df_form_tudo.drop_duplicates(subset=["id_OS", "id_formulario", "Sem_Formulario"], inplace=True)
+        df_form_tudo.to_excel(EXCEL_FORM, index=False)
+    else:
+        df_form_tudo = df_form_exist.copy()
+
+    # --- PARTE 2: BUSCA RESPOSTAS DETALHADAS DE NOVOS FORMULÁRIOS (PELO ID_FORMULARIO) ---
+    colunas_resp = [
+        "id_OS", "Numero OS", "Atualizado em", "id_formulario", "formulario_nome",
+        "formulario_criado_em", "pergunta", "resposta", "Sem_Resposta"
+    ]
+    if os.path.isfile(EXCEL_RESP):
+        df_resp_exist = pd.read_excel(EXCEL_RESP, dtype=str)
+        for col in colunas_resp:
+            if col not in df_resp_exist.columns:
+                df_resp_exist[col] = ""
+    else:
+        df_resp_exist = pd.DataFrame(columns=colunas_resp)
+
+    # NORMALIZAR id_formulario nos DOIS DataFrames (formularios e respostas)
+    df_form_tudo["id_formulario"] = df_form_tudo["id_formulario"].astype(str).str.strip().str.lower()
+    df_resp_exist["id_formulario"] = df_resp_exist["id_formulario"].astype(str).str.strip().str.lower()
+
+    # forms_para_buscar = formularios que possuem formulário (id != "")
+    forms_para_buscar = df_form_tudo[df_form_tudo["Sem_Formulario"] != "SIM"].copy()
+
+    forms_respondidos = set(df_resp_exist["id_formulario"].dropna().unique())
+    # Mostrar debug dos IDs:
+    print("Quantidade UNICA de id_formulario encontrados em tabela_formularios:", df_form_tudo["id_formulario"].nunique())
+    print("Quantidade UNICA de id_formulario encontrados em tabela_respostas_formularios:", df_resp_exist["id_formulario"].nunique())
+    print("Exemplo ids em formularios:", df_form_tudo["id_formulario"].unique()[:5])
+    print("Exemplo ids em respostas:", df_resp_exist["id_formulario"].unique()[:5])
+
+    novos_forms = forms_para_buscar[~forms_para_buscar["id_formulario"].isin(forms_respondidos)]
+
+    print(f"\n[DEBUG RESP] {len(novos_forms)} formulários precisam ser buscados para respostas.\n")
+    novas_linhas_resp = []
+    for _, row in tqdm(novos_forms.iterrows(), total=len(novos_forms), desc="Buscando respostas dos formulários"):
+        resposta = busca_respostas_formulario(row["id_formulario"])
+        if resposta and isinstance(resposta, dict) and resposta.get("questions"):
+            resposta_customizada = formatar_resposta_json(resposta)
+            for r in resposta_customizada["respostas"]:
+                linha = {
+                    "id_OS": resposta_customizada["ordem_id"] or row["id_OS"],
+                    "Numero OS": row["Numero OS"],
+                    "Atualizado em": row["Atualizado em"],
+                    "id_formulario": resposta_customizada["formulario_id"] or row["id_formulario"],
+                    "formulario_nome": resposta_customizada["formulario_nome"],
+                    "formulario_criado_em": resposta_customizada["formulario_criado_em"],
+                    "pergunta": r["pergunta"],
+                    "resposta": r["resposta"],
+                    "Sem_Resposta": ""
+                }
+                novas_linhas_resp.append(linha)
+        else:
+            linha = {
+                "id_OS": row["id_OS"],
+                "Numero OS": row["Numero OS"],
+                "Atualizado em": row["Atualizado em"],
+                "id_formulario": row["id_formulario"],
+                "formulario_nome": "",
+                "formulario_criado_em": "",
+                "pergunta": "",
+                "resposta": "",
+                "Sem_Resposta": "SIM"
+            }
+            novas_linhas_resp.append(linha)
+    if novas_linhas_resp:
+        df_resp_tudo = pd.concat([df_resp_exist, pd.DataFrame(novas_linhas_resp)], ignore_index=True)
+        df_resp_tudo.drop_duplicates(subset=["id_formulario", "pergunta", "resposta"], inplace=True)
+        df_resp_tudo.to_excel(EXCEL_RESP, index=False)
+        print(f"\nProcesso respostas completo! Salvo: {EXCEL_RESP} ({len(df_resp_tudo)} linhas)")
+    else:
+        print("\nNenhuma resposta nova para processar.")
+    print("\n--- FIM DO PROCESSO FORMULÁRIOS/RESPOSTAS ---")
+
+if __name__ == "__main__":
+    main()
