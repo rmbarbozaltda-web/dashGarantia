@@ -82,11 +82,8 @@ def carregar_dados():
             atividades_os = atividades[atividades['order'] == os_id].copy()
             if atividades_os.empty:
                 return 'Sem Atividade', None, False
-
             status_abertos = ['Pendente', 'Em andamento', 'Agendada', 'A caminho', 'Em Rota']
-            
             tem_atividade_aberta = atividades_os['status_pt'].isin(status_abertos).any()
-
             if tem_atividade_aberta:
                 ultima_atividade = atividades_os.sort_values('createdAt', ascending=False).iloc[0]
                 ultimo_status = ultima_atividade['status_pt']
@@ -100,21 +97,18 @@ def carregar_dados():
                     data_conclusao = atividades_finalizadas['completedAt'].max()
                 else:
                     data_conclusao = atividades_os['updatedAt'].max()
-            
             return ultimo_status, data_conclusao, os_concluida
 
         status_info = []
         for os_id in ordens_servico['id']:
             status, data_conclusao, concluida = calcular_status_os(os_id)
             status_info.append({'id': os_id, 'status_final': status, 'data_conclusao': data_conclusao, 'os_concluida': concluida})
-        
         status_df = pd.DataFrame(status_info)
         ordens_servico = ordens_servico.merge(status_df, on='id', how='left')
 
         # LÓGICA DE CORREÇÃO DE DATAS DE CRIAÇÃO
         mask_data_invalida = (ordens_servico['data_conclusao'].notna()) & (ordens_servico['Criado em (UTC)'].notna()) & (ordens_servico['data_conclusao'] < ordens_servico['Criado em (UTC)'])
         os_ids_para_corrigir = ordens_servico.loc[mask_data_invalida, 'id']
-        
         if not os_ids_para_corrigir.empty:
             atividades_para_correcao = atividades[atividades['order'].isin(os_ids_para_corrigir) & atividades['scheduling'].notna()].copy()
             if not atividades_para_correcao.empty:
@@ -138,7 +132,6 @@ def carregar_dados():
         respostas_falhas = respostas[respostas['name'].str.contains('FALHA', case=False, na=False)]
 
         return ordens_servico, atividades, equipamentos, respostas_falhas, depara_etiquetas, depara_estados
-
     except Exception as e:
         st.error(f"Erro ao carregar dados: {str(e)}")
         return None, None, None, None, None, None
@@ -147,9 +140,17 @@ def carregar_dados():
 ordens_servico, atividades, equipamentos, respostas_falhas, depara_etiquetas, depara_estados = carregar_dados()
 
 if ordens_servico is not None:
+    # Adicionar o logo na barra lateral
+    # Certifique-se de que o arquivo de imagem (ex: 'logo.png') está na mesma pasta que o seu script.
+    try:
+        # --- CORREÇÃO APLICADA AQUI ---
+        st.sidebar.image("logo.png", use_container_width=True)
+    except Exception as e:
+        st.sidebar.warning(f"Não foi possível carregar o logo. Verifique o arquivo de imagem.")
+
     # Sidebar com filtros
     st.sidebar.header("🔍 Filtros")
-    
+
     # Filtros
     numeros_os = ['Todos'] + sorted(ordens_servico['Numero OS'].dropna().unique().tolist())
     numero_os_selecionado = st.sidebar.selectbox("Número da OS", numeros_os)
@@ -178,6 +179,7 @@ if ordens_servico is not None:
         max_value=data_max,
         format="DD/MM/YYYY"
     )
+
     st.sidebar.markdown("---")
     sla_dias = st.sidebar.number_input("Meta de SLA (dias)", min_value=1, value=2, step=1)
 
@@ -212,7 +214,7 @@ if ordens_servico is not None:
     os_concluidas_df = df_filtrado[df_filtrado['os_concluida'] == True]
     os_concluidas = len(os_concluidas_df)
     os_em_aberto = total_os - os_concluidas
-    
+
     if not os_concluidas_df.empty:
         os_concluidas_df['tempo_resolucao'] = (os_concluidas_df['data_conclusao'] - os_concluidas_df['Criado em']).dt.days
         tempo_medio_resolucao = os_concluidas_df['tempo_resolucao'].mean()
@@ -222,7 +224,6 @@ if ordens_servico is not None:
         tempo_medio_resolucao = 0
         percentual_dentro_sla = 0
 
-    # --- AJUSTE APLICADO AQUI ---
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Total de OS", total_os)
     col2.metric("OS Concluídas", os_concluidas)
@@ -239,23 +240,23 @@ if ordens_servico is not None:
             sla_status = ['Dentro do SLA' if tempo <= sla_dias else 'Fora do SLA' for tempo in os_concluidas_df['tempo_resolucao']]
             sla_counts = pd.Series(sla_status).value_counts()
             fig_sla = px.pie(
-                values=sla_counts.values, 
-                names=sla_counts.index, 
+                values=sla_counts.values,
+                names=sla_counts.index,
                 color=sla_counts.index,
                 color_discrete_map={'Dentro do SLA':'#2ca02c', 'Fora do SLA':'#d62728'}
             )
             fig_sla.update_traces(textposition='inside', textinfo='percent+label')
-            fig_sla.update_layout(height=400, showlegend=True)
+            fig_sla.update_layout(height=400, showlegend=False)
             st.plotly_chart(fig_sla, use_container_width=True)
         else:
             st.info("Nenhuma OS concluída no período para análise de SLA.")
 
     with col2:
-        st.subheader("Análise de Backlog (OS em Aberto)")
+        st.subheader("Backlog por Idade (OS em Aberto)")
         os_abertas_df = df_filtrado[df_filtrado['os_concluida'] == False].copy()
         if not os_abertas_df.empty:
-            agora_br = pd.Timestamp.now(tz='America/Sao_Paulo')
-            os_abertas_df['idade_os'] = (agora_br - os_abertas_df['Criado em']).dt.days
+            hoje = datetime.now(os_abertas_df['Criado em'].dt.tz)
+            os_abertas_df['idade_os'] = (hoje - os_abertas_df['Criado em']).dt.days
             bins = [-1, 7, 15, 30, np.inf]
             labels = ['Até 7 dias', '8 a 15 dias', '16 a 30 dias', 'Mais de 30 dias']
             os_abertas_df['faixa_idade'] = pd.cut(os_abertas_df['idade_os'], bins=bins, labels=labels)
@@ -284,17 +285,14 @@ if ordens_servico is not None:
             st.subheader("Evolução Mensal - OS Criadas vs Concluídas")
             df_filtrado['mes_criacao'] = df_filtrado['Criado em'].dt.to_period('M').astype(str)
             os_criadas_mes = df_filtrado.groupby('mes_criacao').size().reset_index(name='OS Criadas')
-            
             df_concluidas = df_filtrado[df_filtrado['data_conclusao'].notna()].copy()
             df_concluidas['mes_conclusao'] = df_concluidas['data_conclusao'].dt.to_period('M').astype(str)
             os_concluidas_mes = df_concluidas.groupby('mes_conclusao').size().reset_index(name='OS Concluídas')
-            
             evolucao_mensal = pd.merge(os_criadas_mes, os_concluidas_mes, left_on='mes_criacao', right_on='mes_conclusao', how='outer')
             evolucao_mensal['Mês'] = evolucao_mensal['mes_criacao'].fillna(evolucao_mensal['mes_conclusao'])
             evolucao_mensal['OS Criadas'] = evolucao_mensal['OS Criadas'].fillna(0).astype(int)
             evolucao_mensal['OS Concluídas'] = evolucao_mensal['OS Concluídas'].fillna(0).astype(int)
             evolucao_mensal = evolucao_mensal[['Mês', 'OS Criadas', 'OS Concluídas']].sort_values('Mês')
-            
             fig_evolucao = go.Figure()
             fig_evolucao.add_trace(go.Bar(x=evolucao_mensal['Mês'], y=evolucao_mensal['OS Criadas'], name='OS Criadas', marker_color='#1f77b4', opacity=0.7, text=evolucao_mensal['OS Criadas']))
             fig_evolucao.add_trace(go.Bar(x=evolucao_mensal['Mês'], y=evolucao_mensal['OS Concluídas'], name='OS Concluídas', marker_color='#2ca02c', opacity=0.7, text=evolucao_mensal['OS Concluídas']))
@@ -308,25 +306,20 @@ if ordens_servico is not None:
             criadas = df_filtrado[['Criado em']].copy()
             criadas['tipo'] = 1 # 1 para criação
             criadas.rename(columns={'Criado em': 'data'}, inplace=True)
-            
             concluidas = df_filtrado[df_filtrado['data_conclusao'].notna()][['data_conclusao']].copy()
             concluidas['tipo'] = -1 # -1 para conclusão
             concluidas.rename(columns={'data_conclusao': 'data'}, inplace=True)
-            
             # Combinando os eventos
             eventos = pd.concat([criadas, concluidas])
             eventos['data'] = eventos['data'].dt.date
             eventos_diarios = eventos.groupby('data')['tipo'].sum().reset_index()
-            
             # Criando um range de datas completo para garantir a continuidade
             date_range = pd.date_range(start=eventos_diarios['data'].min(), end=eventos_diarios['data'].max(), freq='D')
             backlog_df = pd.DataFrame(date_range, columns=['data'])
             backlog_df['data'] = backlog_df['data'].dt.date
-            
             # Juntando com os eventos e calculando o backlog cumulativo
             backlog_df = pd.merge(backlog_df, eventos_diarios, on='data', how='left').fillna(0)
             backlog_df['backlog'] = backlog_df['tipo'].cumsum()
-            
             # Plotando o gráfico
             fig_backlog_evolucao = px.area(backlog_df, x='data', y='backlog', title="Evolução Diária do Backlog de OS")
             fig_backlog_evolucao.update_layout(height=400, xaxis_title="Data", yaxis_title="Quantidade de OS em Aberto")
@@ -364,7 +357,7 @@ if ordens_servico is not None:
                 fig_falhas.update_traces(textposition='outside', texttemplate='%{text}')
                 fig_falhas.update_layout(height=500, xaxis_title="Quantidade", yaxis_title="Tipo de Falha", margin=dict(t=60, b=60, l=200, r=100), xaxis=dict(range=[0, falhas_counts.max() * 1.15 if not falhas_counts.empty else 10]))
                 st.plotly_chart(fig_falhas, use_container_width=True)
-            
+
             with col2:
                 falhas_com_data = falhas_filtradas.merge(df_filtrado[['id', 'Criado em']], left_on='order.id', right_on='id')
                 falhas_com_data['mes'] = falhas_com_data['Criado em'].dt.to_period('M').astype(str)
@@ -395,20 +388,17 @@ if ordens_servico is not None:
             'Numero OS', 'Cliente', 'Cliente - Estado', 'Criado em',
             'status_final', 'data_conclusao', 'os_concluida', 'link'
         ]].copy()
-        
         # Mapeia True/False para os textos de exibição
         df_display['os_concluida'] = df_display['os_concluida'].map({True: '✅ Sim', False: '❌ Não'})
-        
         # Renomeia as colunas para exibição
         df_display.columns = ['Número OS', 'Cliente', 'Estado', 'Criado em', 'Status Final', 'Data Conclusão', 'Concluída', 'link']
-        
         st.dataframe(
             df_display,
             use_container_width=True,
             column_config={
                 "link": st.column_config.LinkColumn(
-                    "Relatório", 
-                    help="Clique para abrir o relatório.", 
+                    "Relatório",
+                    help="Clique para abrir o relatório.",
                     display_text="📄"
                 ),
                 "Criado em": st.column_config.DatetimeColumn(
@@ -429,7 +419,6 @@ if ordens_servico is not None:
             df_export = df.copy()
             df_export['Criado em'] = df_export['Criado em'].apply(lambda x: x.strftime('%d/%m/%Y %H:%M') if pd.notna(x) else 'N/A')
             df_export['Data Conclusão'] = df_export['Data Conclusão'].apply(lambda x: x.strftime('%d/%m/%Y %H:%M') if pd.notna(x) else 'N/A')
-            
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_export.to_excel(writer, index=False, sheet_name='OS_Filtradas')
@@ -437,7 +426,6 @@ if ordens_servico is not None:
             return processed_data
 
         excel_data = to_excel(df_display)
-        
         st.download_button(
             label="📥 Baixar Dados Filtrados (XLSX)",
             data=excel_data,
