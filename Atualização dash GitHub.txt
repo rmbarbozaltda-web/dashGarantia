@@ -1,0 +1,12 @@
+Atualização GitHub:
+
+git add dash.py
+
+git commit -m "Feat: ajuste classificação conclusao"
+
+git pull
+
+	:wq
+
+
+git push
