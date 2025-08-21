@@ -170,7 +170,7 @@ if ordens_servico is not None:
     )
 
     st.sidebar.markdown("---")
-    sla_dias = st.sidebar.number_input("Meta de SLA (dias)", min_value=1, value=7, step=1)
+    sla_dias = st.sidebar.number_input("Meta de SLA (dias)", min_value=1, value=2, step=1)
 
     # Aplicando filtros
     df_filtrado = ordens_servico.copy()
