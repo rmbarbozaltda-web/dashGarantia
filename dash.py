@@ -457,8 +457,21 @@ if ordens_servico is not None:
                 how='left'
             )
             agenda_df.dropna(subset=['Numero OS'], inplace=True)
-            agenda_display = agenda_df[['scheduling', 'colaborador_nome', 'Numero OS', 'Cliente']].copy()
-            agenda_display.columns = ['Horário', 'Técnico', 'Número OS', 'Cliente']
+
+            # NOVO: Função para criar a URL do Google Maps a partir das coordenadas
+            def criar_url_mapa(coords):
+                if pd.notna(coords) and isinstance(coords, str) and ',' in coords:
+                    # Garante que não há espaços em branco
+                    coords_limpas = coords.replace(" ", "")
+                    return f"https://www.google.com/maps/search/?api=1&query={coords_limpas}"
+                return None # Retorna None se as coordenadas forem inválidas ou vazias
+
+            # NOVO: Aplica a função para criar a nova coluna com os links
+            agenda_df['map_url'] = agenda_df['coords'].apply(criar_url_mapa)
+
+            # Ajusta as colunas para exibição, incluindo a nova 'map_url'
+            agenda_display = agenda_df[['scheduling', 'colaborador_nome', 'map_url', 'Numero OS', 'Cliente']].copy()
+            agenda_display.columns = ['Horário', 'Técnico', 'Localização', 'Número OS', 'Cliente']
             agenda_display = agenda_display.sort_values(by='Horário')
 
             st.dataframe(
@@ -467,6 +480,12 @@ if ordens_servico is not None:
                     "Horário": st.column_config.TimeColumn(
                         "Horário",
                         format="HH:mm",
+                    ),
+                    # NOVO: Configuração da coluna de link para o mapa
+                    "Localização": st.column_config.LinkColumn(
+                        "Localização",
+                        help="Clique para abrir o local no Google Maps",
+                        display_text="🗺️" # Exibe este ícone na célula
                     )
                 },
                 hide_index=True,
