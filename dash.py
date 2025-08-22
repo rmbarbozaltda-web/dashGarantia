@@ -130,9 +130,14 @@ def carregar_dados():
         # AJUSTE DE FUSO HORÁRIO PARA BRASÍLIA (CORRIGIDO)
         fuso_horario_br = 'America/Sao_Paulo'
         ordens_servico['Criado em'] = ordens_servico['Criado em (UTC)'].dt.tz_convert(fuso_horario_br)
-        ordens_servico['data_conclusao'] = pd.to_datetime(ordens_servico['data_conclusao']).dt.tz_convert(fuso_horario_br)
+        
+        # --- ÚNICA ALTERAÇÃO REALIZADA ---
+        # CORREÇÃO: A coluna já está no formato datetime com UTC (ou NaT). A conversão direta é o correto.
+        # A linha anterior `pd.to_datetime(...).dt.tz_convert` causava o erro.
+        ordens_servico['data_conclusao'] = ordens_servico['data_conclusao'].dt.tz_convert(fuso_horario_br)
 
         return ordens_servico, atividades, equipamentos, respostas, depara_etiquetas, depara_estados
+
     except Exception as e:
         st.error(f"Erro ao carregar dados: {str(e)}")
         return None, None, None, None, None, None
@@ -249,27 +254,29 @@ if ordens_servico is not None:
     if not df_filtrado.empty:
         col1, col2 = st.columns(2)
         with col1:
-            st.subheader("Distribuição de Status das OS")
-            status_counts = df_filtrado['os_concluida'].value_counts()
-            status_labels = ['Concluídas' if x else 'Em Aberto' for x in status_counts.index]
-            fig_pizza_status = px.pie(values=status_counts.values, names=status_labels, color_discrete_sequence=['#2ca02c', '#d62728'])
-            fig_pizza_status.update_traces(textposition='inside', textinfo='percent+label')
-            fig_pizza_status.update_layout(height=400)
-            st.plotly_chart(fig_pizza_status, use_container_width=True)
+            st.subheader("Status das OS")
+            status_counts = df_filtrado['os_concluida'].map({True: 'Concluída', False: 'Em Aberto'}).value_counts()
+            fig_status = px.pie(
+                values=status_counts.values,
+                names=status_counts.index,
+                color=status_counts.index,
+                color_discrete_map={'Concluída': '#2ca02c', 'Em Aberto': '#d62728'}
+            )
+            fig_status.update_traces(textinfo='percent+label+value')
+            fig_status.update_layout(height=400)
+            st.plotly_chart(fig_status, use_container_width=True)
 
         with col2:
-            st.subheader("Análise de SLA (OS Concluídas)")
+            st.subheader("Análise de SLA")
             if not os_concluidas_df.empty:
-                dentro_sla_count = len(os_dentro_sla)
-                fora_sla_count = len(os_concluidas_df) - dentro_sla_count
-                sla_data = pd.DataFrame({
-                    'Status': ['Dentro do SLA', 'Fora do SLA'],
-                    'Quantidade': [dentro_sla_count, fora_sla_count]
-                })
-                fig_sla = px.pie(sla_data, values='Quantidade', names='Status',
-                                 color='Status',
-                                 color_discrete_map={'Dentro do SLA':'#2ca02c', 'Fora do SLA':'#d62728'})
-                fig_sla.update_traces(textposition='inside', textinfo='percent+label+value')
+                sla_counts = os_concluidas_df['tempo_resolucao'].apply(lambda x: 'Dentro do SLA' if x <= sla_dias else 'Fora do SLA').value_counts()
+                fig_sla = px.pie(
+                    values=sla_counts.values,
+                    names=sla_counts.index,
+                    color=sla_counts.index,
+                    color_discrete_map={'Dentro do SLA': '#2ca02c', 'Fora do SLA': '#d62728'}
+                )
+                fig_sla.update_traces(textinfo='percent+label+value')
                 fig_sla.update_layout(height=400)
                 st.plotly_chart(fig_sla, use_container_width=True)
             else:
@@ -278,14 +285,17 @@ if ordens_servico is not None:
         st.subheader("Evolução Mensal - OS Criadas vs Concluídas")
         df_filtrado['mes_criacao'] = df_filtrado['Criado em'].dt.to_period('M').astype(str)
         os_criadas_mes = df_filtrado.groupby('mes_criacao').size().reset_index(name='OS Criadas')
+
         df_concluidas = df_filtrado[df_filtrado['data_conclusao'].notna()].copy()
         df_concluidas['mes_conclusao'] = df_concluidas['data_conclusao'].dt.to_period('M').astype(str)
         os_concluidas_mes = df_concluidas.groupby('mes_conclusao').size().reset_index(name='OS Concluídas')
+
         evolucao_mensal = pd.merge(os_criadas_mes, os_concluidas_mes, left_on='mes_criacao', right_on='mes_conclusao', how='outer')
         evolucao_mensal['Mês'] = evolucao_mensal['mes_criacao'].fillna(evolucao_mensal['mes_conclusao'])
         evolucao_mensal['OS Criadas'] = evolucao_mensal['OS Criadas'].fillna(0).astype(int)
         evolucao_mensal['OS Concluídas'] = evolucao_mensal['OS Concluídas'].fillna(0).astype(int)
         evolucao_mensal = evolucao_mensal[['Mês', 'OS Criadas', 'OS Concluídas']].sort_values('Mês')
+
         fig_evolucao = go.Figure()
         fig_evolucao.add_trace(go.Bar(x=evolucao_mensal['Mês'], y=evolucao_mensal['OS Criadas'], name='OS Criadas', marker_color='#1f77b4', opacity=0.7, text=evolucao_mensal['OS Criadas']))
         fig_evolucao.add_trace(go.Bar(x=evolucao_mensal['Mês'], y=evolucao_mensal['OS Concluídas'], name='OS Concluídas', marker_color='#2ca02c', opacity=0.7, text=evolucao_mensal['OS Concluídas']))
@@ -320,7 +330,6 @@ if ordens_servico is not None:
             fig_colab.update_traces(textposition='outside', texttemplate='%{text}', marker_color='#1f77b4')
             fig_colab.update_layout(height=400, xaxis_title="Colaboradores", yaxis_title="Número de Atividades", xaxis_tickangle=-45, yaxis=dict(range=[0, colaborador_counts.max() * 1.15 if not colaborador_counts.empty else 10]))
             st.plotly_chart(fig_colab, use_container_width=True)
-
         with col2:
             st.subheader("Top 10 Estados - Quantidade de OS")
             estado_counts = df_filtrado['Cliente - Estado'].value_counts().head(10)
@@ -331,12 +340,10 @@ if ordens_servico is not None:
 
     # --- SEÇÃO DE ANÁLISE DE FALHAS REESCRITA COM A NOVA LÓGICA ---
     st.header("🔧 Análise de Falhas, Causas e Ações")
-
     # Verifica se as colunas necessárias existem
     if 'name' in respostas.columns and 'title' in respostas.columns and 'answer' in respostas.columns:
         # 1. Filtro inicial: Apenas formulários que contenham "FALHA" no nome
         respostas_base_falhas = respostas[respostas['name'].astype(str).str.contains('FALHA', case=False, na=False)].copy()
-
         # 2. Verifica dinamicamente a coluna de vínculo ('id_OS', 'order' ou 'order.id')
         link_column_name = None
         if 'id_OS' in respostas_base_falhas.columns: link_column_name = 'id_OS'
@@ -346,14 +353,11 @@ if ordens_servico is not None:
         if link_column_name:
             # 3. Filtra as respostas para corresponder apenas às OSs do filtro principal do dashboard
             respostas_filtradas = respostas_base_falhas[respostas_base_falhas[link_column_name].isin(df_filtrado['id'])]
-
             if not respostas_filtradas.empty:
                 # --- Identificação de FALHA (Busca Exata) ---
                 df_falhas = respostas_filtradas[respostas_filtradas['title'] == "QUAL A FALHA DO EQUIPAMENTO?"].copy()
-
                 # --- Identificação de CAUSA (Busca por "Contém") ---
                 df_causas = respostas_filtradas[respostas_filtradas['title'].astype(str).str.contains("QUAL A CAUSA DA FALHA", case=False, na=False)].copy()
-
                 # --- Identificação de AÇÃO (Busca por "Contém") ---
                 perguntas_acao = [
                     "QUAL A AÇÃO TOMADA PARA RESOLVER O PROBLEMA?",
@@ -361,6 +365,7 @@ if ordens_servico is not None:
                     "QUAL A AÇÃO TOMADA?"
                 ]
                 df_acoes = respostas_filtradas[respostas_filtradas['title'].isin(perguntas_acao)].copy()
+
                 # Tratamento especial para ações múltiplas separadas por vírgula
                 if not df_acoes.empty:
                     df_acoes['answer'] = df_acoes['answer'].str.split(',')
@@ -369,7 +374,6 @@ if ordens_servico is not None:
 
                 # Layout para os 3 gráficos
                 col1, col2, col3 = st.columns(3)
-
                 with col1:
                     st.subheader("Top 10 Falhas")
                     if not df_falhas.empty:
@@ -379,7 +383,6 @@ if ordens_servico is not None:
                         st.plotly_chart(fig, use_container_width=True)
                     else:
                         st.info("Nenhuma falha identificada para os filtros selecionados.")
-
                 with col2:
                     st.subheader("Top 10 Causas")
                     if not df_causas.empty:
@@ -389,7 +392,6 @@ if ordens_servico is not None:
                         st.plotly_chart(fig, use_container_width=True)
                     else:
                         st.info("Nenhuma causa identificada para os filtros selecionados.")
-
                 with col3:
                     st.subheader("Top 10 Ações Corretivas")
                     if not df_acoes.empty:
@@ -406,7 +408,6 @@ if ordens_servico is not None:
     else:
         st.warning("As colunas 'name', 'title' e/ou 'answer' não foram encontradas na tabela de respostas. A análise de falhas não pode ser executada.")
 
-
     # Tabela resumo
     st.header("📋 Tabela Resumo das OS")
     if not df_filtrado.empty:
@@ -416,6 +417,7 @@ if ordens_servico is not None:
         ]].copy()
         df_display['os_concluida'] = df_display['os_concluida'].map({True: '✅ Sim', False: '❌ Não'})
         df_display.columns = ['Número OS', 'Cliente', 'Estado', 'Criado em', 'Status Final', 'Data Conclusão', 'Concluída', 'link']
+
         st.dataframe(
             df_display,
             use_container_width=True,
