@@ -32,7 +32,6 @@ def processar_resposta(dados, id_form):
         processed_data.append({
             'id': id_form,
             'name': dados.get('name', ''),
-            # <<< ALTERAÇÃO 1: Removida a linha 'order.id' que não estava funcionando
             'archived': dados.get('archived', False),
             'type': item.get('type', 'N/A'),
             'title': item.get('title', ''),
@@ -47,7 +46,6 @@ def processar_resposta(dados, id_form):
 def gerar_arquivo_respostas():
     # Carregar dados de tabela_formularios
     formularios_df = pd.read_excel("tabela_formularios.xlsx")
-    
     # Filtrar linhas com "info" válida
     formularios_df_validos = formularios_df[formularios_df["info"] != "NENHUM FORMULÁRIO VINCULADO"].copy()
     
@@ -56,7 +54,7 @@ def gerar_arquivo_respostas():
         respostas_df = pd.read_excel("tabela_respostas.xlsx")
     else:
         respostas_df = pd.DataFrame()
-
+        
     # Listas para controle
     ids_formularios = formularios_df_validos["id"].tolist()
     ids_respostas = respostas_df["id"].tolist() if not respostas_df.empty else []
@@ -67,7 +65,7 @@ def gerar_arquivo_respostas():
     start_time = time.time()
     
     novas_respostas = [] # Lista para armazenar os novos dataframes
-
+    
     for index, id_form in enumerate(ids_formularios):
         precisa_buscar = False
         if id_form not in ids_respostas:
@@ -80,37 +78,45 @@ def gerar_arquivo_respostas():
                 # Marcar para remover o antigo e buscar o novo
                 respostas_df = respostas_df[respostas_df['id'] != id_form]
                 precisa_buscar = True
-
+                
         if precisa_buscar:
             dados = buscar_dados_api(id_form)
             if dados:
                 resposta_df = processar_resposta(dados, id_form)
                 novas_respostas.append(resposta_df)
-
+                
         # Exibir progresso
         progresso = (index + 1) / total_ids * 100
         elapsed_time = time.time() - start_time
         print(f"Progresso: {progresso:.2f}%, Tempo decorrido: {elapsed_time:.2f} segundos", end='\r')
-
+        
     print("\nProcessamento da API concluído. Consolidando dados...")
-
+    
     # Concatenar todas as novas respostas de uma vez (mais eficiente)
     if novas_respostas:
         respostas_df = pd.concat([respostas_df] + novas_respostas, ignore_index=True)
-
-    # <<< ALTERAÇÃO 2: Criar um "mapa" com as colunas que queremos adicionar
+        
+    # Criar um "mapa" com as colunas que queremos adicionar
     mapa_os = formularios_df[['id', 'id_OS', 'Numero OS']]
+    
+    # <<< CORREÇÃO: Remover as colunas do mapa que já possam existir em respostas_df antes do merge >>>
+    # Isso evita o erro de colunas duplicadas em execuções repetidas.
+    colunas_para_remover = [col for col in ['id_OS', 'Numero OS'] if col in respostas_df.columns]
+    if colunas_para_remover:
+        respostas_df = respostas_df.drop(columns=colunas_para_remover)
 
-    # <<< ALTERAÇÃO 3: Fazer o merge para adicionar 'id_OS' e 'Numero OS' à tabela de respostas
+    # Fazer o merge para adicionar 'id_OS' e 'Numero OS' à tabela de respostas
     # Usamos 'left' para garantir que todas as respostas sejam mantidas
     respostas_df_final = pd.merge(respostas_df, mapa_os, on='id', how='left')
-
-    # <<< ALTERAÇÃO 4: Salvar o dataframe final, já com as colunas da OS
+    
+    # Salvar o dataframe final, já com as colunas da OS
     respostas_df_final.to_excel("tabela_respostas.xlsx", index=False)
+    
     print("Atualização concluída e salva em tabela_respostas.xlsx")
 
 # Executar a função principal
 gerar_arquivo_respostas()
+
 
 
 
