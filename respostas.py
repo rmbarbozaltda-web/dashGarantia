@@ -99,15 +99,16 @@ def gerar_arquivo_respostas():
     # Criar um "mapa" com as colunas que queremos adicionar
     mapa_os = formularios_df[['id', 'id_OS', 'Numero OS']]
     
-    # <<< CORREÇÃO: Remover as colunas do mapa que já possam existir em respostas_df antes do merge >>>
-    # Isso evita o erro de colunas duplicadas em execuções repetidas.
+    # CORREÇÃO: Remover as colunas do mapa que já possam existir em respostas_df antes do merge
     colunas_para_remover = [col for col in ['id_OS', 'Numero OS'] if col in respostas_df.columns]
     if colunas_para_remover:
         respostas_df = respostas_df.drop(columns=colunas_para_remover)
 
     # Fazer o merge para adicionar 'id_OS' e 'Numero OS' à tabela de respostas
-    # Usamos 'left' para garantir que todas as respostas sejam mantidas
     respostas_df_final = pd.merge(respostas_df, mapa_os, on='id', how='left')
+    
+    # <<< NOVA ALTERAÇÃO: Remover as linhas onde 'archived' é True >>>
+    respostas_df_final = respostas_df_final[respostas_df_final['archived'] == False]
     
     # Salvar o dataframe final, já com as colunas da OS
     respostas_df_final.to_excel("tabela_respostas.xlsx", index=False)
@@ -116,6 +117,7 @@ def gerar_arquivo_respostas():
 
 # Executar a função principal
 gerar_arquivo_respostas()
+
 
 
 
