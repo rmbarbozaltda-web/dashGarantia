@@ -176,11 +176,13 @@ if ordens_servico is not None:
         max_value=data_max,
         format="DD/MM/YYYY"
     )
+
     st.sidebar.markdown("---")
     sla_dias = st.sidebar.number_input("Meta de SLA (dias)", min_value=1, value=2, step=1)
 
     # Aplicando filtros
     df_filtrado = ordens_servico.copy()
+
     if status_os_selecionado == 'Abertos':
         df_filtrado = df_filtrado[df_filtrado['os_concluida'] == False]
     elif status_os_selecionado == 'Fechados':
@@ -194,8 +196,9 @@ if ordens_servico is not None:
         df_filtrado = df_filtrado[df_filtrado['Cliente - Estado'] == estado_selecionado]
     if equipamento_selecionado != 'Todos':
         df_filtrado = df_filtrado[df_filtrado['Etiquetas_Processadas'].apply(lambda x: equipamento_selecionado in x)]
-    
+
     atividades_filtro_os = atividades[atividades['order'].isin(df_filtrado['id'])]
+
     if colaborador_selecionado != 'Todos':
         os_ids_colaborador = atividades[atividades['colaborador_nome'] == colaborador_selecionado]['order'].unique()
         df_filtrado = df_filtrado[df_filtrado['id'].isin(os_ids_colaborador)]
@@ -232,20 +235,18 @@ if ordens_servico is not None:
     }
     .card-total { border-left: 6px solid #0ea5e9; } /* Azul vibrante */
     .card-concluidas { border-left: 6px solid #22c55e; } /* Verde vibrante */
-    .card-abertas { border-left: 6px solid #f59e0b; } /* Amarelo/Âmbar vibrante */
+    .card-abertas { border-left: 6px solid #f59e0b; } /* Amarelo vibrante */
     .card-sla { border-left: 6px solid #ef4444; } /* Vermelho vibrante */
-    .card h2 {
-        margin: 0 0 10px 0;
-        font-size: 1.2em;
+    .card-title {
+        font-size: 1.1rem;
         font-weight: 600;
+        margin-bottom: 10px;
         text-align: center;
-        color: #94a3b8; /* Cor do título mais suave */
     }
-    .card .numero {
-        margin: 0;
-        font-size: 2.5em;
-        font-weight: bold;
-        color: #f8fafc; /* Cor do número bem clara */
+    .card-value {
+        font-size: 2.5rem;
+        font-weight: 700;
+        text-align: center;
     }
     </style>
     """
@@ -253,127 +254,118 @@ if ordens_servico is not None:
 
     # Cálculos dos KPIs
     total_os = len(df_filtrado)
-    os_concluidas_count = df_filtrado['os_concluida'].sum()
-    os_abertas_count = total_os - os_concluidas_count
+    os_concluidas = df_filtrado['os_concluida'].sum()
+    os_abertas = total_os - os_concluidas
+    df_concluidas = df_filtrado[df_filtrado['os_concluida']].copy()
     
-    df_concluidas_sla = df_filtrado[df_filtrado['os_concluida']].copy()
-    if not df_concluidas_sla.empty:
-        df_concluidas_sla['sla'] = (df_concluidas_sla['data_conclusao'] - df_concluidas_sla['Criado em']).dt.days
-        sla_medio = df_concluidas_sla['sla'].mean()
-        sla_medio_str = f"{sla_medio:.1f} dias" if pd.notna(sla_medio) else "N/A"
-    else:
-        sla_medio = 0
-        sla_medio_str = "N/A"
+    sla_medio_dias = 0
+    percentual_no_sla = 0
+    if not df_concluidas.empty:
+        df_concluidas['tempo_resolucao'] = (df_concluidas['data_conclusao'] - df_concluidas['Criado em']).dt.days
+        sla_medio_dias = df_concluidas['tempo_resolucao'].mean()
+        os_no_sla = (df_concluidas['tempo_resolucao'] <= sla_dias).sum()
+        percentual_no_sla = (os_no_sla / len(df_concluidas)) * 100 if len(df_concluidas) > 0 else 0
 
-    # Exibição dos KPIs com os cards customizados
+    # Exibição dos cards
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.markdown(f'<div class="card card-total"><h2>Total de OS</h2><p class="numero">{total_os}</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="card card-total"><div class="card-title">Total de OS</div><div class="card-value">{total_os}</div></div>', unsafe_allow_html=True)
     with col2:
-        st.markdown(f'<div class="card card-concluidas"><h2>OS Concluídas</h2><p class="numero">{os_concluidas_count}</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="card card-concluidas"><div class="card-title">OS Concluídas</div><div class="card-value">{os_concluidas}</div></div>', unsafe_allow_html=True)
     with col3:
-        st.markdown(f'<div class="card card-abertas"><h2>OS em Aberto</h2><p class="numero">{os_abertas_count}</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="card card-abertas"><div class="card-title">OS Abertas</div><div class="card-value">{os_abertas}</div></div>', unsafe_allow_html=True)
     with col4:
-        st.markdown(f'<div class="card card-sla"><h2>SLA Médio</h2><p class="numero">{sla_medio_str}</p></div>', unsafe_allow_html=True)
+        # <-- CARD CORRIGIDO PARA MOSTRAR O SLA MÉDIO EM DIAS -->
+        st.markdown(f'<div class="card card-sla"><div class="card-title">SLA Médio (dias)</div><div class="card-value">{sla_medio_dias:.1f}</div></div>', unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     # --- SEÇÃO DE GRÁFICOS PRINCIPAIS ---
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        # <<< INÍCIO DA SEÇÃO DO GRÁFICO VELOCÍMETRO CORRIGIDO >>>
-        st.subheader("Atingimento da Meta de SLA")
+    st.header("📈 Evolução e Desempenho")
+    
+    # --- GRÁFICO DE BARRAS "EVOLUÇÃO MENSAL" ---
+    st.subheader("Evolução Mensal de OS (Abertas vs. Fechadas)")
+    df_filtrado['mes_ano_criacao'] = df_filtrado['Criado em'].dt.to_period('M')
+    df_filtrado_concluidas = df_filtrado[df_filtrado['data_conclusao'].notna()].copy()
+    df_filtrado_concluidas['mes_ano_conclusao'] = df_filtrado_concluidas['data_conclusao'].dt.to_period('M')
+    
+    abertas_por_mes = df_filtrado.groupby('mes_ano_criacao').size()
+    fechadas_por_mes = df_filtrado_concluidas.groupby('mes_ano_conclusao').size()
+    
+    meses = sorted(list(set(abertas_por_mes.index.to_timestamp()) | set(fechadas_por_mes.index.to_timestamp())))
+    meses = [pd.Period(m, 'M') for m in meses]
+    meses_str = [m.strftime('%Y-%m') for m in meses]
+    
+    abertas_vals = [abertas_por_mes.get(mes, 0) for mes in meses]
+    fechadas_vals = [fechadas_por_mes.get(mes, 0) for mes in meses]
+    
+    fig_evolucao = go.Figure()
+    fig_evolucao.add_trace(go.Bar(
+        x=meses_str,
+        y=abertas_vals,
+        name='Abertas',
+        marker_color='#0ea5e9', # <-- COR ALTERADA PARA AZUL
+        text=abertas_vals,
+        textposition='outside' # <-- POSIÇÃO DO RÓTULO ALTERADA
+    ))
+    fig_evolucao.add_trace(go.Bar(
+        x=meses_str,
+        y=fechadas_vals,
+        name='Fechadas',
+        marker_color='#22c55e',
+        text=fechadas_vals,
+        textposition='outside' # <-- POSIÇÃO DO RÓTULO ALTERADA
+    ))
 
-        # --- Lógica para calcular o percentual de atingimento do SLA ---
-        percentual_sla = 0 # Valor padrão
-        if not df_concluidas_sla.empty:
-            # A coluna 'sla' já foi calculada em dias anteriormente
-            os_dentro_prazo = (df_concluidas_sla['sla'] <= sla_dias).sum()
-            total_concluidas = len(df_concluidas_sla)
-            
-            # Calcula o percentual, evitando divisão por zero
-            if total_concluidas > 0:
-                percentual_sla = (os_dentro_prazo / total_concluidas) * 100
+    # Ajuste para garantir que os rótulos não sejam cortados
+    max_y_val = 0
+    if abertas_vals or fechadas_vals:
+        max_y_val = max(max(abertas_vals) if abertas_vals else [0], max(fechadas_vals) if fechadas_vals else [0])
 
-        # --- Criação do gráfico de velocímetro com o percentual ---
-        fig_gauge = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=percentual_sla,
-            number={'suffix': '%', 'font': {'size': 40}},
-            title={'text': f"Meta: {sla_dias} dias", 'font': {'size': 20}},
-            gauge={
-                'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
-                'bar': {'color': "#0ea5e9"},
-                'bgcolor': "white",
-                'borderwidth': 2,
-                'bordercolor': "gray",
-                'steps': [
-                    {'range': [0, 50], 'color': '#ef4444'},   # Vermelho
-                    {'range': [50, 80], 'color': '#f59e0b'},  # Amarelo
-                    {'range': [80, 100], 'color': '#22c55e'}  # Verde
-                ],
-            },
-            domain={'x': [0, 1], 'y': [0, 1]}
-        ))
-        
-        fig_gauge.update_layout(
-            height=500, # Altura ajustada para alinhar com o gráfico de barras
-            margin=dict(l=20, r=20, t=50, b=20)
-        )
-        # <<< FIM DA SEÇÃO DO GRÁFICO VELOCÍMETRO >>>
-        
-        st.plotly_chart(fig_gauge, use_container_width=True)
+    fig_evolucao.update_layout(
+        barmode='group',
+        xaxis_title="Mês",
+        yaxis_title="Quantidade de OS",
+        legend_title="Status",
+        height=500,
+        margin=dict(l=20, r=20, t=40, b=20),
+        yaxis=dict(range=[0, max_y_val * 1.15 + 1]) # Adiciona espaço no topo
+    )
+    st.plotly_chart(fig_evolucao, use_container_width=True)
 
-    with col2:
-        st.subheader("OS Criadas vs Concluídas")
-        df_filtrado['mes_ano_criacao'] = df_filtrado['Criado em'].dt.to_period('M').astype(str)
-        df_filtrado['mes_ano_conclusao'] = df_filtrado['data_conclusao'].dt.to_period('M').astype(str)
-        
-        criadas_por_mes = df_filtrado.groupby('mes_ano_criacao').size().reset_index(name='criadas')
-        criadas_por_mes.rename(columns={'mes_ano_criacao': 'mes_ano'}, inplace=True)
-        
-        concluidas_por_mes = df_filtrado[df_filtrado['os_concluida']].groupby('mes_ano_conclusao').size().reset_index(name='concluidas')
-        concluidas_por_mes.rename(columns={'mes_ano_conclusao': 'mes_ano'}, inplace=True)
-        
-        tendencia_df = pd.merge(criadas_por_mes, concluidas_por_mes, on='mes_ano', how='outer').fillna(0)
-        tendencia_df = tendencia_df.sort_values('mes_ano')
-        
-        fig_tendencia = go.Figure()
-        fig_tendencia.add_trace(go.Bar(
-            x=tendencia_df['mes_ano'], 
-            y=tendencia_df['criadas'], 
-            name='Criadas', 
-            marker_color='#0ea5e9', # Azul vibrante
-            text=tendencia_df['criadas'],
-            textposition='auto'
-        ))
-        fig_tendencia.add_trace(go.Bar(
-            x=tendencia_df['mes_ano'], 
-            y=tendencia_df['concluidas'], 
-            name='Concluídas', 
-            marker_color='#22c55e', # Verde vibrante
-            text=tendencia_df['concluidas'],
-            textposition='auto'
-        ))
-        
-        max_y = 0
-        if not tendencia_df.empty:
-            max_y = max(tendencia_df['criadas'].max(), tendencia_df['concluidas'].max()) * 1.15
-        
-        fig_tendencia.update_layout(
-            barmode='group', 
-            height=500, # Altura aumentada
-            xaxis_title="Mês/Ano", 
-            yaxis_title="Quantidade de OS", 
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            yaxis=dict(range=[0, max_y])
-        )
-        st.plotly_chart(fig_tendencia, use_container_width=True)
+    # --- GRÁFICO DE VELOCÍMETRO ---
+    st.subheader("Percentual de OS Concluídas no Prazo (SLA)")
+    fig_sla = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=percentual_no_sla,
+        title={'text': f"Meta: {sla_dias} dias"},
+        domain={'x': [0, 1], 'y': [0, 1]},
+        gauge={
+            'axis': {'range': [None, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
+            'bar': {'color': "#1e293b"},
+            'borderwidth': 2,
+            'bordercolor': "gray",
+            'steps': [
+                {'range': [0, 70], 'color': '#ef4444'},
+                {'range': [70, 90], 'color': '#f59e0b'},
+                {'range': [90, 100], 'color': '#22c55e'}
+            ],
+            'threshold': {
+                'line': {'color': "red", 'width': 4},
+                'thickness': 0.75,
+                'value': 95
+            }
+        }
+    ))
+    fig_sla.update_layout(
+        height=300,
+        margin=dict(l=30, r=30, t=50, b=20)
+    )
+    st.plotly_chart(fig_sla, use_container_width=True)
 
     # --- SEÇÃO DE GRÁFICOS DE BARRAS ---
     st.markdown("---")
     st.header("📋 Análises por Categoria")
-
     if not df_filtrado.empty:
         col1, col2 = st.columns(2)
         with col1:
@@ -391,7 +383,7 @@ if ordens_servico is not None:
             fig_estados.update_traces(textposition='outside', texttemplate='%{text}', marker_color='#1f77b4')
             fig_estados.update_layout(height=400, xaxis_title="Estados", yaxis_title="Quantidade de OS", xaxis_tickangle=-45, yaxis=dict(range=[0, estado_counts.max() * 1.15 if not estado_counts.empty else 10]))
             st.plotly_chart(fig_estados, use_container_width=True)
-        
+
         # Gráfico de Equipamentos
         st.subheader("Top 10 Equipamentos com mais OS")
         df_equipamentos = df_filtrado.explode('Etiquetas_Processadas')
@@ -421,6 +413,7 @@ if ordens_servico is not None:
                 df_causas = respostas_filtradas[respostas_filtradas['title'].astype(str).str.contains("QUAL A CAUSA DA FALHA", case=False, na=False)].copy()
                 perguntas_acao = ["QUAL A AÇÃO TOMADA PARA RESOLVER O PROBLEMA?", "QUAL AÇÃO FOI TOMADA?", "QUAL A AÇÃO TOMADA?"]
                 df_acoes = respostas_filtradas[respostas_filtradas['title'].isin(perguntas_acao)].copy()
+
                 if not df_acoes.empty:
                     df_acoes['answer'] = df_acoes['answer'].str.split(',')
                     df_acoes = df_acoes.explode('answer')
@@ -490,19 +483,18 @@ if ordens_servico is not None:
                 how='left'
             )
             agenda_df.dropna(subset=['Numero OS'], inplace=True)
-            
+
             def criar_url_mapa(coords):
                 if pd.notna(coords) and isinstance(coords, str) and ',' in coords:
                     coords_limpas = coords.replace(" ", "")
                     return f"https://www.google.com/maps/search/?api=1&query={coords_limpas}"
                 return None
-            
             agenda_df['map_url'] = agenda_df['coords'].apply(criar_url_mapa)
-            
+
             agenda_display = agenda_df[['scheduling', 'colaborador_nome', 'map_url', 'Numero OS', 'Cliente']].copy()
             agenda_display.columns = ['Horário', 'Técnico', 'Localização', 'Número OS', 'Cliente']
             agenda_display = agenda_display.sort_values(by='Horário')
-            
+
             st.dataframe(
                 agenda_display,
                 column_config={
@@ -534,7 +526,7 @@ if ordens_servico is not None:
         ]].copy()
         df_display['os_concluida'] = df_display['os_concluida'].map({True: '✅ Sim', False: '❌ Não'})
         df_display.columns = ['Número OS', 'Cliente', 'Estado', 'Criado em', 'Status Final', 'Data Conclusão', 'Concluída', 'link']
-        
+
         st.dataframe(
             df_display,
             use_container_width=True,
