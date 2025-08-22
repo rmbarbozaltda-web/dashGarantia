@@ -82,7 +82,7 @@ def carregar_dados():
             atividades_os = atividades[atividades['order'] == os_id].copy()
             if atividades_os.empty:
                 return 'Sem Atividade', None, False
-            
+
             status_abertos = ['Pendente', 'Em andamento', 'Agendada', 'A caminho', 'Em Rota']
             tem_atividade_aberta = atividades_os['status_pt'].isin(status_abertos).any()
 
@@ -105,14 +105,14 @@ def carregar_dados():
         for os_id in ordens_servico['id']:
             status, data_conclusao, concluida = calcular_status_os(os_id)
             status_info.append({'id': os_id, 'status_final': status, 'data_conclusao': data_conclusao, 'os_concluida': concluida})
-        
+
         status_df = pd.DataFrame(status_info)
         ordens_servico = ordens_servico.merge(status_df, on='id', how='left')
 
         # LÓGICA DE CORREÇÃO DE DATAS DE CRIAÇÃO
         mask_data_invalida = (ordens_servico['data_conclusao'].notna()) & (ordens_servico['Criado em (UTC)'].notna()) & (ordens_servico['data_conclusao'] < ordens_servico['Criado em (UTC)'])
         os_ids_para_corrigir = ordens_servico.loc[mask_data_invalida, 'id']
-        
+
         if not os_ids_para_corrigir.empty:
             atividades_para_correcao = atividades[atividades['order'].isin(os_ids_para_corrigir) & atividades['scheduling'].notna()].copy()
             if not atividades_para_correcao.empty:
@@ -174,6 +174,7 @@ if ordens_servico is not None:
 
     data_min = ordens_servico['Criado em'].min().date()
     data_max = ordens_servico['Criado em'].max().date()
+
     data_inicio, data_fim = st.sidebar.date_input(
         "Período de Criação",
         value=[data_min, data_max],
@@ -181,6 +182,7 @@ if ordens_servico is not None:
         max_value=data_max,
         format="DD/MM/YYYY"
     )
+
     st.sidebar.markdown("---")
     sla_dias = st.sidebar.number_input("Meta de SLA (dias)", min_value=1, value=2, step=1)
 
@@ -216,15 +218,13 @@ if ordens_servico is not None:
     total_os = len(df_filtrado)
     os_concluidas = df_filtrado['os_concluida'].sum()
     os_abertas = total_os - os_concluidas
-    
     tempo_medio_resolucao = np.nan
     percentual_sla = 0
-    
+
     os_concluidas_df = df_filtrado[df_filtrado['os_concluida']].copy()
     if not os_concluidas_df.empty:
         os_concluidas_df['tempo_resolucao'] = (os_concluidas_df['data_conclusao'] - os_concluidas_df['Criado em']).dt.days
         tempo_medio_resolucao = os_concluidas_df['tempo_resolucao'].mean()
-        
         os_concluidas_df['dentro_sla'] = os_concluidas_df['tempo_resolucao'] <= sla_dias
         percentual_sla = (os_concluidas_df['dentro_sla'].sum() / len(os_concluidas_df)) * 100 if len(os_concluidas_df) > 0 else 0
 
@@ -236,67 +236,50 @@ if ordens_servico is not None:
     col5.metric("Tempo Médio (dias)", f"{tempo_medio_resolucao:.1f}" if not np.isnan(tempo_medio_resolucao) else "N/A")
     st.markdown("---")
 
-    # --- SEÇÃO DE GRÁFICOS DE PIZZA ATUALIZADA ---
+    # --- SEÇÃO DE GRÁFICOS (AJUSTADO) ---
     st.header("📊 Análises Visuais")
     if not df_filtrado.empty:
         col1, col2 = st.columns(2)
-        
-        # Cores padrão
-        colors = ['#2ca02c', '#d62728'] # Verde, Vermelho
 
         with col1:
-            # Gráfico 1: Distribuição de Status
+            # Gráfico 1: Distribuição de Status (BARRAS)
+            st.subheader("Distribuição de Status das OS")
             status_counts = df_filtrado['os_concluida'].value_counts()
             status_labels_map = {True: 'Concluídas', False: 'Em Aberto'}
-            
-            labels = [status_labels_map.get(key, 'N/A') for key in status_counts.index]
-            values = status_counts.values
-            
-            fig_status = go.Figure(data=[go.Pie(
-                labels=labels, 
-                values=values,
-                marker_colors=colors,
-                textinfo='percent',
-                insidetextfont=dict(size=16, color='white'),
-                hole=.3
-            )])
-            
+            status_counts.index = status_counts.index.map(status_labels_map)
+
+            fig_status = px.bar(
+                status_counts,
+                x=status_counts.index,
+                y=status_counts.values,
+                text=status_counts.values,
+                color=status_counts.index,
+                color_discrete_map={'Concluídas': '#2ca02c', 'Em Aberto': '#d62728'},
+                labels={'x': 'Status', 'y': 'Quantidade de OS'}
+            )
+            fig_status.update_traces(textposition='outside')
             fig_status.update_layout(
-                title_text="Distribuição de Status das OS",
-                showlegend=True,
-                legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
+                showlegend=False,
+                yaxis=dict(range=[0, status_counts.max() * 1.15 if not status_counts.empty else 10])
             )
             st.plotly_chart(fig_status, use_container_width=True)
 
         with col2:
-            # Gráfico 2: Análise de SLA
+            # Gráfico 2: Análise de SLA (PIZZA)
+            st.subheader("Análise de SLA (OS Concluídas)")
             if not os_concluidas_df.empty:
                 sla_counts = os_concluidas_df['dentro_sla'].value_counts()
                 sla_labels_map = {True: 'Dentro do SLA', False: 'Fora do SLA'}
+                sla_counts.index = sla_counts.index.map(sla_labels_map)
 
-                labels_sla = [sla_labels_map.get(key, 'N/A') for key in sla_counts.index]
-                values_sla = sla_counts.values
-
-                # Garante a ordem das cores (Verde para Dentro, Vermelho para Fora)
-                color_map_sla = {'Dentro do SLA': '#2ca02c', 'Fora do SLA': '#d62728'}
-                final_colors_sla = [color_map_sla[label] for label in labels_sla]
-
-                fig_sla = go.Figure(data=[go.Pie(
-                    labels=labels_sla, 
-                    values=values_sla,
-                    marker_colors=final_colors_sla,
-                    # Template para mostrar porcentagem e valor absoluto
-                    texttemplate='%{percent}<br>(%{value})',
-                    textposition='inside',
-                    insidetextfont=dict(size=16, color='white'),
+                fig_sla = px.pie(
+                    values=sla_counts.values,
+                    names=sla_counts.index,
+                    color=sla_counts.index,
+                    color_discrete_map={'Dentro do SLA': '#2ca02c', 'Fora do SLA': '#d62728'},
                     hole=.3
-                )])
-                
-                fig_sla.update_layout(
-                    title_text="Análise de SLA (OS Concluídas)",
-                    showlegend=True,
-                    legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
                 )
+                fig_sla.update_traces(textinfo='percent+value', textposition='auto', pull=[0.05, 0])
                 st.plotly_chart(fig_sla, use_container_width=True)
             else:
                 st.info("Nenhuma OS concluída para análise de SLA.")
@@ -306,6 +289,7 @@ if ordens_servico is not None:
 
     # Gráficos de Barras
     st.header("📈 Análises Detalhadas")
+
     st.subheader("Backlog de OS em Aberto por Idade")
     os_abertas_df = df_filtrado[~df_filtrado['os_concluida']].copy()
     if not os_abertas_df.empty:
@@ -321,6 +305,53 @@ if ordens_servico is not None:
     else:
         st.info("Nenhuma OS em aberto no período.")
 
+    st.markdown("---")
+    st.subheader("Abertura vs. Fechamento de OS por Mês")
+    if not df_filtrado.empty:
+        # Preparar dados de abertura
+        df_filtrado['MesAno_Abertura'] = df_filtrado['Criado em'].dt.to_period('M')
+        os_abertas_mes = df_filtrado.groupby('MesAno_Abertura').size()
+        os_abertas_mes.name = 'Abertas'
+
+        # Preparar dados de fechamento
+        df_fechadas = df_filtrado[df_filtrado['os_concluida']].copy()
+        df_fechadas['MesAno_Fechamento'] = df_fechadas['data_conclusao'].dt.to_period('M')
+        os_fechadas_mes = df_fechadas.groupby('MesAno_Fechamento').size()
+        os_fechadas_mes.name = 'Fechadas'
+
+        # Combinar os dados
+        df_mes = pd.concat([os_abertas_mes, os_fechadas_mes], axis=1).fillna(0).astype(int)
+        df_mes.index = df_mes.index.strftime('%Y-%m') # Formatar o índice para exibição
+
+        # Criar o gráfico
+        fig_abertura_fechamento = go.Figure()
+        fig_abertura_fechamento.add_trace(go.Bar(
+            x=df_mes.index,
+            y=df_mes['Abertas'],
+            name='OS Abertas',
+            marker_color='#1f77b4',
+            text=df_mes['Abertas']
+        ))
+        fig_abertura_fechamento.add_trace(go.Bar(
+            x=df_mes.index,
+            y=df_mes['Fechadas'],
+            name='OS Fechadas',
+            marker_color='#2ca02c',
+            text=df_mes['Fechadas']
+        ))
+
+        fig_abertura_fechamento.update_traces(textposition='outside')
+        fig_abertura_fechamento.update_layout(
+            barmode='group',
+            height=400,
+            xaxis_title="Mês",
+            yaxis_title="Quantidade de OS",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+        st.plotly_chart(fig_abertura_fechamento, use_container_width=True)
+    else:
+        st.info("Nenhum dado para exibir o gráfico de Abertura vs. Fechamento.")
+
     if not df_filtrado.empty:
         col1, col2 = st.columns(2)
         with col1:
@@ -331,6 +362,7 @@ if ordens_servico is not None:
             fig_colab.update_traces(textposition='outside', texttemplate='%{text}', marker_color='#1f77b4')
             fig_colab.update_layout(height=400, xaxis_title="Colaboradores", yaxis_title="Número de Atividades", xaxis_tickangle=-45, yaxis=dict(range=[0, colaborador_counts.max() * 1.15 if not colaborador_counts.empty else 10]))
             st.plotly_chart(fig_colab, use_container_width=True)
+
         with col2:
             st.subheader("Top 10 Estados - Quantidade de OS")
             estado_counts = df_filtrado['Cliente - Estado'].value_counts().head(10)
@@ -403,6 +435,7 @@ if ordens_servico is not None:
         datetime.now(),
         format="DD/MM/YYYY"
     )
+
     os_garantia_ids = ordens_servico['id'].unique()
     atividades_agendadas = atividades[
         (atividades['order'].isin(os_garantia_ids)) &
@@ -427,7 +460,7 @@ if ordens_servico is not None:
             agenda_display = agenda_df[['scheduling', 'colaborador_nome', 'Numero OS', 'Cliente']].copy()
             agenda_display.columns = ['Horário', 'Técnico', 'Número OS', 'Cliente']
             agenda_display = agenda_display.sort_values(by='Horário')
-            
+
             st.dataframe(
                 agenda_display,
                 column_config={
@@ -443,7 +476,6 @@ if ordens_servico is not None:
             st.info(f"Nenhuma atividade agendada para o dia {data_agenda.strftime('%d/%m/%Y')}.")
     else:
         st.info("Nenhuma atividade agendada encontrada.")
-
     st.markdown("---")
 
     # Tabela resumo
@@ -455,7 +487,7 @@ if ordens_servico is not None:
         ]].copy()
         df_display['os_concluida'] = df_display['os_concluida'].map({True: '✅ Sim', False: '❌ Não'})
         df_display.columns = ['Número OS', 'Cliente', 'Estado', 'Criado em', 'Status Final', 'Data Conclusão', 'Concluída', 'link']
-        
+
         st.dataframe(
             df_display,
             use_container_width=True,
